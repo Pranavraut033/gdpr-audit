@@ -1,0 +1,16 @@
+{
+  "name": "gdpr-audit",
+  "description": "GDPR Audit, a Claude Code plugin for auditing and fixing website privacy issues",
+  "owner": {
+    "name": "Pranav Raut",
+    "url": "https://github.com/Pranavraut033"
+  },
+  "plugins": [
+    {
+      "name": "gdpr-audit",
+      "source": "./",
+      "description": "Repeatable consent-scenario website scan, sourced GDPR/ePrivacy/PECR rule catalogue, data usage map, and fixes on your go-ahead.",
+      "category": "security"
+    }
+  ]
+}

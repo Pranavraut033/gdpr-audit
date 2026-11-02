@@ -1,0 +1,5 @@
+{
+  "name": "fixture-site",
+  "private": true,
+  "scripts": { "dev": "node server.mjs" }
+}

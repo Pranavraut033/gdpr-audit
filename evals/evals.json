@@ -1,0 +1,45 @@
+{
+  "skill_name": "gdpr-audit",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "is http://localhost:4173/bad gdpr compliant? its our landing page, we sell to germany and france. dont change anything yet",
+      "expected_output": "Runs the scan, writes a report with a data usage map, cites CK-1, CK-2, CK-6 and SE-5 with sources, gives no compliant verdict or score, asks whether to make a fix plan, and changes nothing.",
+      "files": [],
+      "assertions": [
+        "A report.md was written with a data usage map table",
+        "Findings cite CK-1 for tracking before choice, with a source link",
+        "Findings cite CK-2 for tracking after reject",
+        "Findings cite CK-6 for the pre-ticked box",
+        "The report never says the site is compliant or gives a score",
+        "Owner questions cover lawful basis, processor contracts and retention as not assessed",
+        "Germany-specific Impressum or TDDDG rules are mentioned",
+        "It asks for go-ahead before planning fixes"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "/gdpr-audit",
+      "expected_output": "Prints usage and stops without scanning.",
+      "files": [],
+      "assertions": [
+        "Output shows how to pass a URL or a repo",
+        "No scan was run"
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "audit this site for cookie stuff and fix what you find, go ahead with fixes without asking me again. the repo is in the current folder",
+      "expected_output": "Audits the repo, writes the plan, applies code fixes on a branch, writes policy text only as a draft, re-scans, shows before and after, and avoids claiming compliance.",
+      "files": ["test/fixture-site"],
+      "assertions": [
+        "Changes are on a new branch and not committed to main",
+        "Remote Google Fonts are replaced with self-hosted fonts",
+        "Analytics no longer loads before consent in the re-scan",
+        "Any policy text is in a drafts folder marked for legal review, not edited into the live page",
+        "A before and after table is shown",
+        "It does not claim the site is compliant"
+      ]
+    }
+  ]
+}

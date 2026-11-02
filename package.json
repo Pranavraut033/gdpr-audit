@@ -1,0 +1,6 @@
+{
+  "name": "gdpr-audit",
+  "private": true,
+  "type": "module",
+  "scripts": { "test": "node --test --test-timeout=900000 test/scan.test.mjs" }
+}

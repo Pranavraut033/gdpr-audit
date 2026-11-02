@@ -1,0 +1,10 @@
+{
+  "name": "gdpr-audit-scanner",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@duckduckgo/autoconsent": "17.2.0",
+    "playwright": "1.64.1",
+    "tldts": "7.4.19"
+  }
+}
