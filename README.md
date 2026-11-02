@@ -40,7 +40,7 @@ Or just ask: "does my cookie banner actually work?"
 
 ## Limits
 
-- Banners vary by location. A scan from outside the EU or UK reports a missing banner as inconclusive, so use `--proxy` if you need to.
+- Banners vary by location. A scan from outside the EU or UK reports a missing banner as inconclusive, so use `--proxy` if you need to. To learn the scan's country, each run also requests `cloudflare.com/cdn-cgi/trace`, the only request not caused by the target site.
 - Bot-protected sites may report "could not assess". It doesn't try to get around protection or solve CAPTCHAs.
 - It only sees public pages, with no login, and only a few per site.
 - Unknown third-party hosts are judged by Claude, so check those calls.

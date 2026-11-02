@@ -82,8 +82,8 @@ Scan fields in `scan.json` are named so you can go straight to the evidence.
 | CK-16 | Not gate access on accepting cookies without an equivalent same-controller option. National views differ, see §9 and §10 | Banner | 05/2020 paras 37-41 | H | P |
 | CK-17 | Treat page visits and button clicks that may reveal sensitive data as possible Art 9 data, for example health shop pixels | Site subject plus `requests` | C-252/21 release | H | R |
 | CK-18 | Not treat the TCF as proof of compliance. The TC String is personal data | `tcf` | [IAB Europe C-604/22 release](https://curia.europa.eu/site/upload/docs/application/pdf/2024-03/cp240044en.pdf); rule is I | M | R |
-| CK-20 | Get prior consent for marketing email, with a soft opt-in only for similar products to existing customers. Keep it separate from cookie consent, and flag it for legal review, since national rules differ (such as §7 UWG in Germany) | `forms` | ePrivacy Art 13 ([consolidated text](https://eur-lex.europa.eu/legal-content/EN/TXT/HTML/?uri=CELEX:02002L0058-20091219)); [Inteligo C-654/23](https://www.matheson.com/insights/cjeu-clarifies-direct-marketing-rules-under-eprivacy-directive/) | M | M |
 | CK-19 | After reject, have no TCF purpose consent set to true | `reject`: `tcf.purposeConsents` | I, from CK-2 | H | I |
+| CK-20 | Get prior consent for marketing email, with a soft opt-in only for similar products to existing customers. Keep it separate from cookie consent, and flag it for legal review, since national rules differ (such as §7 UWG in Germany) | `forms` | ePrivacy Art 13 ([consolidated text](https://eur-lex.europa.eu/legal-content/EN/TXT/HTML/?uri=CELEX:02002L0058-20091219)); [Inteligo C-654/23](https://www.matheson.com/insights/cjeu-clarifies-direct-marketing-rules-under-eprivacy-directive/) | M | M |
 
 **Limits on these rules**
 - The Taskforce report calls itself a minimum threshold, not a green light.
