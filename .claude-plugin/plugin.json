@@ -2,7 +2,7 @@
   "name": "gdpr-audit",
   "displayName": "GDPR Audit",
   "description": "Audit any website for GDPR, ePrivacy and UK PECR issues with a repeatable browser scan and a sourced rule catalogue, show how personal data is used, then plan and apply fixes only after you say go.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "author": {
     "name": "Pranav Raut",
     "url": "https://github.com/Pranavraut033"

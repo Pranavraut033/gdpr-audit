@@ -4,6 +4,7 @@
 //
 //   node scan.mjs <url> [--out dir] [--pages 3] [--headless] [--proxy url]
 //                       [--locale en-GB] [--browser chrome|chromium]
+//   node scan.mjs --help              show usage
 //   node scan.mjs --install           install pinned dependencies (~43 MB) to the cache
 //   node scan.mjs --install-browser   download Playwright's Chromium (~150 MB)
 //
@@ -24,12 +25,13 @@ const SCENARIOS = ['none', 'reject', 'accept'];
 const EU_UK = new Set('AT BE BG HR CY CZ DK EE FI FR DE GR HU IE IT LV LT LU MT NL PL PT RO SK SI ES SE IS LI NO GB'.split(' '));
 
 const REJECT = /^(reject|decline|deny|refuse|disagree)( all| cookies| all cookies| optional( cookies)?| non-essential( cookies)?)?$|(only|just) (the )?(necessary|essential|required)|(necessary|essential|required)( cookies)? only|use necessary|continue without accepting|alle ablehnen|^ablehnen$|nur (notwendige|erforderliche|essenzielle)|tout refuser|^refuser$|continuer sans accepter|rechazar|rifiuta|alles weigeren|^weigeren$|afwijzen|rejeitar|recusar|odrzuć/i;
-const ACCEPT = /^(accept|agree|allow|i accept|i agree|ok|okay|got it)( all| cookies| all cookies)?!?$|accept (all|cookies)|allow all|alle akzeptieren|^akzeptieren$|alle (cookies )?zulassen|^zustimmen$|tout accepter|^accepter$|aceptar|accetta|alles accepteren|^accepteren$|^aceitar|akceptuję/i;
+export const ACCEPT = /^(accept|agree|allow|i accept|i agree|ok|okay|got it)( all| cookies| all cookies)?!?$|^(accept|allow|agree to)( all| the)?( analytics| marketing| optional| tracking| statistics| statistical| additional| non-essential)( cookies)?$|^(accept|agree)( and | & )(continue|close)$|accept (all|cookies)|allow all|alle akzeptieren|^akzeptieren$|alle (cookies )?zulassen|^zustimmen$|tout accepter|^accepter$|aceptar|accetta|alles accepteren|^accepteren$|^aceitar|akceptuję/i;
 const MANAGE = /^(manage|customi[sz]e|settings|preferences|options|more options)|(cookie|privacy) (settings|preferences)|einstellungen|anpassen|paramétrer|personnaliser|configurar|gestisci|instellingen/i;
 const BANNER_CONTEXT = /cookie|consent|privacy|tracking|datenschutz|einwilligung|confidentialit|privacidad|privacit|toestemming/i;
 const CHALLENGE = /just a moment|attention required|verify you are human|are you a robot|checking your browser|access denied|unusual traffic|captcha/i;
 const PRIVACY_LINK = /privacy|datenschutz|confidentialit|privacidad|privacit|gegevensbescherming|cookie.?(policy|richtlinie)/i;
 const IMPRINT_LINK = /impressum|imprint|legal.?notice|mentions.?l[eé]gales|aviso.?legal|colofon|note.?legali/i;
+const USAGE = 'Usage: node scan.mjs <url> [--out dir] [--pages 3] [--headless] [--proxy url] [--locale en-GB] [--browser chrome|chromium]';
 
 // ponytail: short hand-written list, not a tracker database. NC-licensed lists stay out
 // so client audits are safe. Unknown hosts are reported unclassified for Claude to judge.
@@ -67,6 +69,8 @@ export function vendorFor(host, path = '') {
     if (path.startsWith('/recaptcha')) return { vendor: 'Google reCAPTCHA', category: 'captcha' };
     if (path.startsWith('/maps')) return { vendor: 'Google Maps', category: 'embed' };
   }
+  // gtag.js shares a host with Tag Manager, but rules about GTM don't apply to it.
+  if (host.endsWith('googletagmanager.com') && path.startsWith('/gtag/')) return { vendor: 'Google tag (gtag.js)', category: 'analytics-or-ads' };
   for (let h = host; h.includes('.'); h = h.slice(h.indexOf('.') + 1)) {
     if (VENDORS[h]) return { vendor: VENDORS[h][0], category: VENDORS[h][1] };
   }
@@ -111,9 +115,10 @@ export function describeUrl(raw) {
   const u = new URL(raw);
   const params = [...u.searchParams.keys()];
   const sensitive = [];
+  const gaHit = /\/g\/collect$/.test(u.pathname); // GA's `sid` is an analytics session number, not a login
   for (const [k, v] of u.searchParams) {
     if (/[^\s@=&]+@[^\s@=&]+\.[a-z]{2,}/i.test(v)) sensitive.push({ param: k, kind: 'email' });
-    else if (/^(token|access_token|id_token|auth|password|passwd|pwd|apikey|api_key|session|sessionid|sid|secret)$/i.test(k) && v) sensitive.push({ param: k, kind: 'credential-like' });
+    else if (/^(token|access_token|id_token|auth|password|passwd|pwd|apikey|api_key|session|sessionid|sid|secret)$/i.test(k) && v && !(gaHit && k === 'sid')) sensitive.push({ param: k, kind: 'credential-like' });
   }
   if (/[^/@]+@[^/@]+\.[a-z]{2,}/i.test(decodeURIComponent(u.pathname))) sensitive.push({ param: '(path)', kind: 'email' });
   return { scheme: u.protocol.slice(0, -1), host: u.hostname, path: u.pathname.slice(0, 120), params, gcs: u.searchParams.get('gcs'), sensitive };
@@ -317,10 +322,11 @@ async function scanScenario({ browser, playwrightOpts, url, name, innerPages, pa
     await settle(page);
     const facts = await page.evaluate(pageFacts, { privacy: PRIVACY_LINK.source, imprint: IMPRINT_LINK.source }).catch(() => ({ links: [], forms: [], privacyLinks: [], imprintLinks: [], bodyText: '', title: '' }));
     const status = res?.status?.() ?? null;
+    const httpError = status >= 400;
     pages.push({
-      url: page.url(), status, title: facts.title, phase,
+      url: page.url(), status, httpError, title: facts.title, phase,
       challenge: CHALLENGE.test(facts.title) || (CHALLENGE.test(facts.bodyText) && facts.links.length < 10) || status === 403 || status === 429 || status === 503,
-      hasPrivacyLink: facts.privacyLinks.length > 0, hasImprintLink: facts.imprintLinks.length > 0,
+      hasPrivacyLink: httpError ? null : facts.privacyLinks.length > 0, hasImprintLink: httpError ? null : facts.imprintLinks.length > 0,
     });
     forms.push(...facts.forms.filter((f) => f.personalFields.length || f.checkboxes || f.insecureAction).map((f) => ({ page: page.url(), ...f })));
     await snapshot();
@@ -362,14 +368,13 @@ async function scanScenario({ browser, playwrightOpts, url, name, innerPages, pa
       // No click means a CMP API call or a hidden banner, which proves no visitor-usable control.
       action.method = clicks.length ? 'autoconsent-click' : 'autoconsent-no-click';
     }
-    phase = 'post-choice';
     await settle(page);
     action.clicks = clicks.slice(0, 10);
     banner.stillVisibleAfterChoice = (await findControls(page)).some((c) => c.kind === 'accept' || c.kind === 'reject');
     action.completed = action.method.endsWith('-click') && action.method !== 'autoconsent-no-click' && !banner.stillVisibleAfterChoice;
     banner.action = action;
     await snapshot();
-    await page.screenshot({ path: join(outDir, `${name}-after-choice.png`) }).catch(() => {});
+    if (phase === 'post-choice') await page.screenshot({ path: join(outDir, `${name}-after-choice.png`) }).catch(() => {});
     if (page.url() !== url && !pages.some((p) => p.url === page.url())) pages.push({ url: page.url(), phase, navigatedAfterChoice: true });
   }
 
@@ -456,17 +461,22 @@ export function summarise(scenarios) {
   const cookieNames = (s, phase) => (s?.cookies ?? []).filter((c) => c.firstSeen === phase).map((c) => c.name).sort();
   const rejectPost = hosts(by.reject, 'post-choice');
   const rejectPre = new Set(hosts(by.reject, 'pre-choice'));
+  // null means no choice was made, so there is nothing to read. [] means one was tried and nothing new appeared.
+  const ifTried = (s, value) => (s?.banner.action && s.banner.action.method !== 'none-found' ? value : null);
   return {
+    bannerDetected: by.none?.banner.detected ?? false,
     preChoiceThirdParties: hosts(by.none, 'pre-choice'),
     preChoiceCookies: cookieNames(by.none, 'pre-choice'),
     preChoiceStorageKeys: (by.none?.storage ?? []).map((s) => `${s.kind}:${s.key}`),
     rejectCompleted: by.reject?.banner.action?.completed ?? false,
     rejectMethod: by.reject?.banner.action?.method ?? null,
-    newThirdPartiesAfterReject: rejectPost.filter((h) => !rejectPre.has(h)),
-    thirdPartiesAfterReject: rejectPost,
-    newCookiesAfterReject: cookieNames(by.reject, 'post-choice'),
-    newThirdPartiesAfterAccept: hosts(by.accept, 'post-choice').filter((h) => !hosts(by.accept, 'pre-choice').includes(h)),
-    newCookiesAfterAccept: cookieNames(by.accept, 'post-choice'),
+    acceptCompleted: by.accept?.banner.action?.completed ?? false,
+    acceptMethod: by.accept?.banner.action?.method ?? null,
+    newThirdPartiesAfterReject: ifTried(by.reject, rejectPost.filter((h) => !rejectPre.has(h))),
+    thirdPartiesAfterReject: ifTried(by.reject, rejectPost),
+    newCookiesAfterReject: ifTried(by.reject, cookieNames(by.reject, 'post-choice')),
+    newThirdPartiesAfterAccept: ifTried(by.accept, hosts(by.accept, 'post-choice').filter((h) => !hosts(by.accept, 'pre-choice').includes(h))),
+    newCookiesAfterAccept: ifTried(by.accept, cookieNames(by.accept, 'post-choice')),
   };
 }
 
@@ -496,10 +506,11 @@ function loadDeps() {
 }
 
 export function parseArgs(argv) {
-  const opts = { url: null, out: null, pages: 3, headless: false, proxy: null, locale: 'en-GB', browser: 'chrome', install: false, installBrowser: false };
+  const opts = { url: null, out: null, pages: 3, headless: false, proxy: null, locale: 'en-GB', browser: 'chrome', install: false, installBrowser: false, help: false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
-    if (a === '--headless') opts.headless = true;
+    if (a === '--help' || a === '-h') opts.help = true;
+    else if (a === '--headless') opts.headless = true;
     else if (a === '--install') opts.install = true;
     else if (a === '--install-browser') opts.installBrowser = true;
     else if (a === '--out') opts.out = argv[++i];
@@ -525,6 +536,10 @@ async function main() {
     console.error(e.message);
     process.exit(2);
   }
+  if (opts.help) {
+    console.log(USAGE);
+    return;
+  }
   if (opts.install) {
     mkdirSync(CACHE, { recursive: true });
     copyFileSync(join(HERE, 'package.json'), join(CACHE, 'package.json'));
@@ -542,7 +557,7 @@ async function main() {
     return;
   }
   if (!opts.url) {
-    console.error('Usage: node scan.mjs <url> [--out dir] [--pages 3] [--headless] [--proxy url] [--locale en-GB] [--browser chrome|chromium]');
+    console.error(USAGE);
     process.exit(2);
   }
 
@@ -587,18 +602,24 @@ async function main() {
   const security = noneLanding ? await securitySignals(opts.url, noneLanding.headers) : null;
   await browser.close();
 
-  const challenged = scenarios.filter((s) => s.pages.length === 0 || s.pages[0].error || s.pages[0].challenge).map((s) => s.name);
+  const challenged = scenarios.filter((s) => s.pages.length === 0 || s.pages[0].error || s.pages[0].challenge || s.pages[0].httpError).map((s) => s.name);
+  const summary = summarise(scenarios);
+  const errorPages = [...new Set(scenarios.flatMap((s) => s.pages.filter((p) => p.httpError).map((p) => `${p.url} (${p.status})`)))];
   const report = {
     meta: {
-      url: opts.url, scannedAt: new Date().toISOString(), tool: 'gdpr-audit 0.1.0', browser: opts.browser, headless: opts.headless, locale: opts.locale,
+      url: opts.url, finalUrl: scenarios[0].pages[0]?.url ?? null, scannedAt: new Date().toISOString(), tool: 'gdpr-audit 0.1.1', browser: opts.browser, headless: opts.headless, locale: opts.locale,
       egressCountry: country, egressInEuUk: country ? EU_UK.has(country) : null, localTarget: local,
       assessable: challenged.length === 0, couldNotAssess: challenged,
       notes: [
         !local && country && !EU_UK.has(country) ? 'Scan left from outside the EU/UK. A missing banner is inconclusive.' : null,
         !local && !country ? 'Egress country unknown. A missing banner is inconclusive.' : null,
+        !summary.bannerDetected ? 'No banner found, so no choice was made. After-reject and after-accept fields are null, which is not a clean result.' : null,
+        summary.bannerDetected && !summary.rejectCompleted ? 'Banner found but reject did not complete. Do not read the reject scenario as a clean result.' : null,
+        summary.bannerDetected && !summary.acceptCompleted ? 'Banner found but accept did not complete, so what loads after consent is unknown and vendors may be incomplete.' : null,
+        errorPages.length ? `Pages returned an HTTP error and were not assessed: ${errorPages.join(', ')}` : null,
       ].filter(Boolean),
     },
-    summary: summarise(scenarios),
+    summary,
     vendors: vendorMap(scenarios),
     policies,
     security: security && { ...security, mixedContent: scenarios[0].mixedContent, sensitiveUrls: dedupe(scenarios.flatMap((s) => s.sensitiveUrls)) },

@@ -32,6 +32,12 @@ export function startFixture(port = 0) {
       // Reject button that does nothing.
       case '/sticky':
         return html(shell(banner('<button>Reject all</button><button>Accept all</button>')));
+      // Purpose-specific accept label, as on a site that only runs analytics.
+      case '/accept-analytics':
+        return html(shell(banner(`<button onclick="this.parentNode.remove()">Decline</button><button onclick="${pixel('after-accept')}this.parentNode.remove()">Accept analytics</button>`)));
+      // The first inner link is dead.
+      case '/dead-link':
+        return html('<!doctype html><title>Fixture</title><a href="/gone">Gone</a>');
       // A vendor's policy link appears before the site's own.
       case '/vendor-link':
         return html(`<!doctype html><title>Fixture</title><a href="http://127.0.0.1:${port}/privacy">Vendor privacy</a><a href="/privacy">Privacy policy</a>`);

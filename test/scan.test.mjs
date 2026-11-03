@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { describeUrl, loadCookieDb, lookupCookie, parseCsv, parseEgress, vendorFor } from '../skills/gdpr-audit/scripts/scan.mjs';
+import { ACCEPT, describeUrl, loadCookieDb, lookupCookie, parseCsv, parseEgress, vendorFor } from '../skills/gdpr-audit/scripts/scan.mjs';
 import { startFixture } from './fixture/server.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -27,7 +27,7 @@ function scan(path) {
 before(async () => {
   fixture = await startFixture();
   tmp = mkdtempSync(join(tmpdir(), 'gdpr-audit-'));
-  for (const p of ['/bad', '/good', '/hide-only', '/no-banner', '/fingerprint', '/challenge', '/cmp-rule', '/sticky', '/vendor-link']) results.set(p, await scan(p));
+  for (const p of ['/bad', '/good', '/hide-only', '/no-banner', '/fingerprint', '/challenge', '/cmp-rule', '/sticky', '/vendor-link', '/accept-analytics', '/dead-link', '/gone']) results.set(p, await scan(p));
 }, { timeout: 900000 });
 after(() => { fixture.close(); rmSync(tmp, { recursive: true, force: true }); });
 
@@ -129,4 +129,59 @@ test('policy text is saved and the link is found', () => {
   assert.equal(privacy.found, true);
   assert.equal(r.scenarios.none.pages[0].hasPrivacyLink, true);
   assert.equal(r.scenarios.none.pages.length, 2, 'inner page visited');
+});
+
+test('unit: accept labels, Google tag label, analytics session IDs', () => {
+  for (const t of ['Accept analytics', 'Allow analytics cookies', 'Accept optional cookies', 'Accept and continue', 'Accept all']) assert.match(t, ACCEPT);
+  for (const t of ['Allow selection', 'Accept selected', 'Accept terms']) assert.doesNotMatch(t, ACCEPT, 'these save a selection or mean something else');
+  assert.equal(vendorFor('www.googletagmanager.com', '/gtag/js').vendor, 'Google tag (gtag.js)');
+  assert.equal(vendorFor('www.googletagmanager.com', '/gtm.js').vendor, 'Google Tag Manager');
+  assert.deepEqual(describeUrl('https://region1.google-analytics.com/g/collect?sid=123').sensitive, []);
+  assert.equal(describeUrl('https://x.io/p?sid=123').sensitive[0].kind, 'credential-like');
+});
+
+test('purpose-specific accept label is clicked and reported', () => {
+  const r = results.get('/accept-analytics');
+  assert.equal(r.summary.acceptCompleted, true);
+  assert.equal(r.summary.acceptMethod, 'text-click');
+  assert.deepEqual(r.summary.newThirdPartiesAfterAccept, ['127.0.0.1']);
+  assert.ok(r.scenarios.none.banner.firstLayer.some((c) => c.kind === 'accept'));
+});
+
+test('no banner: nothing is labelled post-choice and after-choice fields are null, not empty', () => {
+  const r = results.get('/no-banner');
+  assert.equal(r.summary.bannerDetected, false);
+  for (const k of ['newThirdPartiesAfterReject', 'thirdPartiesAfterReject', 'newCookiesAfterReject', 'newThirdPartiesAfterAccept', 'newCookiesAfterAccept']) assert.equal(r.summary[k], null, k);
+  assert.equal(r.summary.acceptCompleted, false);
+  assert.equal(r.summary.acceptMethod, 'none-found');
+  for (const s of ['reject', 'accept']) assert.ok(r.scenarios[s].requests.every((q) => q.phase === 'pre-choice'), s);
+  assert.ok(r.meta.notes.some((n) => /No banner/.test(n)));
+});
+
+test('accept that could not be made is flagged, and reject data stays usable', () => {
+  const r = results.get('/cmp-rule');
+  assert.equal(r.summary.bannerDetected, true);
+  const hide = results.get('/hide-only');
+  assert.equal(hide.summary.newCookiesAfterReject, null);
+  assert.deepEqual(hide.summary.newThirdPartiesAfterAccept, ['127.0.0.1']);
+  assert.ok(hide.meta.notes.some((n) => /reject/i.test(n)));
+  const sticky = results.get('/sticky');
+  assert.deepEqual(sticky.summary.newCookiesAfterReject, [], 'a click was tried, so this is evidence');
+  assert.ok(sticky.meta.notes.some((n) => /accept/i.test(n)));
+});
+
+test('error pages are marked, not read as pages without a privacy link', () => {
+  const r = results.get('/dead-link');
+  const dead = r.scenarios.none.pages.find((p) => p.status === 404);
+  assert.equal(dead.httpError, true);
+  assert.equal(dead.hasPrivacyLink, null);
+  assert.equal(r.meta.assessable, true);
+  assert.ok(r.meta.notes.some((n) => n.includes('/gone')));
+  assert.equal(results.get('/gone').meta.assessable, false, 'a dead landing page');
+});
+
+test('final URL is recorded and --help works without dependencies or a URL', async () => {
+  assert.match(results.get('/good').meta.finalUrl, /\/good$/);
+  const out = await new Promise((resolve, reject) => execFile('node', [SCAN, '--help'], (e, o) => (e ? reject(e) : resolve(o))));
+  assert.match(out, /Usage: node scan\.mjs/);
 });

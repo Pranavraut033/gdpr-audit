@@ -40,22 +40,22 @@ If only a repo is given, start its dev server and scan the local URL. Say that p
 The script is at `scripts/scan.mjs` under this skill's base directory.
 
 ```bash
-node <base>/scripts/scan.mjs <url> [--pages 3] [--locale de-DE] [--proxy <url>] [--headless]
+node <base>/scripts/scan.mjs <url> [--out <dir>] [--pages 3] [--locale de-DE] [--proxy <url>] [--headless] [--browser chrome|chromium]
 ```
 
 - **Exit 3:** dependencies are missing. Tell the user it installs about 43 MB to `~/.cache/gdpr-audit`, get a yes, then run `--install`.
 - **Exit 4:** Chrome isn't installed. Tell the user it downloads about 150 MB of Chromium, get a yes, then run `--install-browser` and scan with `--browser chromium`.
 - It opens a visible browser window, because headless browsers get blocked about twice as often. Tell the user beforehand. It uses clean sessions and never touches their Chrome profile.
 - It takes about a minute per site. Run it once; repeat visits to someone else's site aren't needed.
-- Use `--locale` for the site's language if the banner is not English, since it helps the banner be found.
+- The locale defaults to `en-GB`. Use `--locale` for the site's language if the banner is not English, since it helps the banner be found, and remember the default when judging language (NT-8).
 
-Output goes to `gdpr-audit-reports/<host>-<date>/`: `scan.json`, screenshots, and saved policy text. If the target is a repo, make sure that folder is not committed.
+Output goes to `gdpr-audit-reports/<host>-<date>/` unless `--out` says otherwise: `scan.json`, screenshots, and saved policy text. If the target is a repo, make sure that folder is not committed.
 
-Read `summary` and `meta` first, then go to `scenarios` for evidence. **Look at the before-choice screenshot yourself**: it is the evidence for banner design (CK-8, CK-9), and the text patterns can miss things. If you need to see what a button or script really does, read the page source with `curl`.
+Read `summary` and `meta` first, including every line in `meta.notes`, then go to `scenarios` for evidence. **Look at the before-choice screenshot yourself**: it is the evidence for banner design (CK-8, CK-9), and the text patterns can miss things. If you need to see what a button or script really does, read the page source with `curl`.
 
-**`scan.json` shape:** `meta`, `summary`, `vendors[]` (`vendor`, `category`, `hosts`, `seen` by scenario and phase), `policies[]`, `security`, `forms[]`, and `scenarios.{none,reject,accept}` each with `banner` (`detected`, `cmp`, `firstLayer`, `rejectOnFirstLayer`, `action`, `stillVisibleAfterChoice`), `pages[]`, `requests[]` (`phase`, `host`, `path`, `params`, `thirdParty`, `vendor`, `category`; query values are never stored), `cookies[]` (`firstSeen`, `name`, `domain`, `thirdParty`, `expiresDays`, `secure`, `httpOnly`, `sameSite`, `ocd`), `storage[]`, `canvas[]`, `websockets[]`, `gcs[]`, `tcf`. Phases are `pre-choice` and `post-choice`.
+**`scan.json` shape:** `meta` (with `finalUrl` after redirects and `notes`), `summary`, `vendors[]` (`vendor`, `category`, `hosts`, `seen` by scenario and phase), `policies[]`, `security`, `forms[]`, and `scenarios.{none,reject,accept}` each with `banner` (`detected`, `cmp`, `firstLayer`, `rejectOnFirstLayer`, `action`, `stillVisibleAfterChoice`), `pages[]` (`status`, `httpError`; the link fields are null on an error page), `requests[]` (`phase`, `host`, `path`, `params`, `thirdParty`, `vendor`, `category`; query values are never stored), `cookies[]` (`firstSeen`, `name`, `domain`, `thirdParty`, `expiresDays`, `secure`, `httpOnly`, `sameSite`, `ocd`), `storage[]`, `canvas[]`, `websockets[]`, `gcs[]`, `tcf`. Phases are `pre-choice` and `post-choice`. Requests are only `post-choice` once a choice was attempted, and `<scenario>-after-choice.png` only exists then. In `summary`, an after-reject or after-accept field that is `null` means no choice was attempted, while `[]` means one was and nothing new appeared.
 
-The scanner only clicks banner buttons. It doesn't test changing a choice later or clicking a load-on-demand embed, so check those by hand after a fix.
+The scanner only clicks banner buttons. It doesn't test changing a choice later, clicking a load-on-demand embed, or features that connect only when used, such as WebRTC or a chat widget. Check those by hand or in the code.
 
 ### When the scan can't conclude
 
@@ -69,16 +69,19 @@ Report these as `Inconclusive`, never as a pass:
 | `rejectMethod: none-found` with a banner visible in the screenshot | Could be a real missing reject, or a label the patterns don't know. Check the screenshot, then decide |
 | `rejectMethod: autoconsent-no-click` | A rule only called an API or hid the banner, so no visitor-usable reject was proven |
 | `rejectCompleted: false` | Scenario `reject` shows no reject behaviour, so CK-2 can't be judged from it |
+| `acceptCompleted: false` with a banner | What loads after consent is unknown, and `vendors` may be incomplete. Don't call the accept side clean. Check the repo, or test by hand and label the result as manual |
+| `bannerDetected: false` | No choice could be tested, so banner design and reject rules are `Inconclusive`. This doesn't soften pre-choice evidence: tracking seen before any choice is still `Observed` (CK-1). Check the screenshot, since the patterns can miss a banner |
+| `pages[].httpError: true` | That page wasn't assessed. It says nothing about privacy links. A dead landing page makes the scan not assessable |
 
 ## 3. Static check (when there's a repo)
 
 Search for what the scan can miss, such as code paths behind login, or tags only in production config:
 
 ```bash
-grep -rnE 'googletagmanager|google-analytics|gtag\(|fbq\(|fonts\.googleapis|youtube\.com/embed|maps\.google|recaptcha|hotjar|clarity\.ms|segment\.|mixpanel|posthog|plausible' --exclude-dir={node_modules,.git,.next,dist,build,gdpr-audit-reports} .
+grep -rnE 'googletagmanager|google-analytics|gtag\(|fbq\(|fonts\.googleapis|youtube\.com/embed|maps\.google|recaptcha|hotjar|clarity\.ms|segment\.|mixpanel|posthog|plausible|cdnjs|jsdelivr|unpkg|stun:|RTCPeerConnection|new WebSocket|sendBeacon' --exclude='.env*' --exclude-dir={node_modules,.git,.next,dist,build,out,gdpr-audit-reports} .
 ```
 
-Also check: how the consent state gates scripts, form checkboxes that default to ticked, account deletion and data export routes, logging of personal data, and `.env` production tag IDs.
+Also check: how the consent state gates scripts, form checkboxes that default to ticked, account deletion and data export routes, logging of personal data, and production tag IDs. In `.env` files look at variable names only (`cut -d= -f1`), and never print the values.
 
 ## 4. Assess
 
@@ -87,6 +90,7 @@ Read `references/gdpr-reference.md` and walk its rule catalogue against the evid
 Things that are easy to get wrong:
 
 - **Reject versus accept is the core test.** Compare what appears after reject to what appears after accept. A consent record such as `CookieConsent` after reject is fine; ad cookies are not.
+- **Google tag versus Tag Manager.** `Google tag (gtag.js)` and `Google Tag Manager` share a host but are different products. Apply GTM-specific rulings only to `gtm.js`, and judge gtag.js by what it sends.
 - **Pre-choice third-party hosts aren't automatically violations.** A self-served CMP script or CDN font differs from an ad pixel. Judge what the host does: `vendors` classifies common ones, and the rest are `vendor: null` for you to work out. Say when you're unsure.
 - **Open Cookie Database categories (`ocd`) are hints,** not proof of "strictly necessary".
 - **UK:** first-party statistics with notice and an objection route may need no consent (§11). Don't apply EU CK-1 mechanically to a UK-only site.
@@ -119,6 +123,9 @@ Not legal advice. Observed from <country>, <browser>, <n> pages. Law as of <refe
 - Evidence: <what was seen, in which scenario and phase, with screenshot file>
 - Source: <citation with link, and how settled it is>
 - Fix class: auto | human | legal
+
+## Checked, nothing observed
+<Rule IDs tested with nothing found, in one or two lines. Say what was tested. This is not a pass: it covers only these pages, this location and this visit.>
 
 ## Questions only you can answer
 <GV questionnaire, pre-filled with the observed vendors>
